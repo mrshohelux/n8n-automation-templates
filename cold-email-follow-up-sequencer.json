@@ -1,0 +1,201 @@
+{
+  "name": "Cold Email Follow-Up Sequencer (reply-aware)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "hours", "hoursInterval": 1 }] }
+      },
+      "id": "cron-1",
+      "name": "Schedule: Hourly Check",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [220, 320]
+    },
+    {
+      "parameters": {
+        "content": "## Why hourly, not a long sleep\nn8n Wait nodes are fine for short delays but a workflow run shouldn't sit paused for days. Instead, sequence state (step number, last_sent_at) lives in the sheet/DB, and this hourly trigger just asks: 'who is due for their next step right now?'",
+        "height": 180,
+        "width": 280
+      },
+      "id": "sticky-1",
+      "name": "Note: State lives outside the run",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [200, 120]
+    },
+    {
+      "parameters": {
+        "operation": "lookup",
+        "documentId": { "mode": "id", "value": "PLACEHOLDER_SHEET_ID" },
+        "sheetName": { "mode": "name", "value": "Outreach Queue" },
+        "filtersUI": {
+          "values": [
+            { "lookupColumn": "status", "lookupValue": "active" }
+          ]
+        }
+      },
+      "id": "sheets-due",
+      "name": "Get: Leads Due for Next Step",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [460, 320],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "PLACEHOLDER_CRED_ID", "name": "PLACEHOLDER Google Sheets account" }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.next_send_due }}",
+              "rightValue": "={{ $now.toISO() }}",
+              "operator": { "type": "dateTime", "operation": "before" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-due",
+      "name": "IF: Step Is Due Now",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [700, 320]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.yourMailProvider.com/v1/threads/{{ $json.thread_id }}",
+        "method": "GET",
+        "options": {}
+      },
+      "id": "http-check-reply",
+      "name": "HTTP: Check Thread for Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [940, 320],
+      "credentials": {
+        "httpHeaderAuth": { "id": "PLACEHOLDER_CRED_ID", "name": "PLACEHOLDER Mail Provider API" }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## The guard that matters most\nThis is the single most important node in the workflow. Skipping it is the #1 way cold-outreach automations embarrass a business — sending Step 3 to someone who already replied yesterday.",
+        "height": 160,
+        "width": 260
+      },
+      "id": "sticky-2",
+      "name": "Note: Reply guard",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [920, 140]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.has_reply }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-replied",
+      "name": "IF: Already Replied",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1180, 320]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": { "mode": "id", "value": "PLACEHOLDER_SHEET_ID" },
+        "sheetName": { "mode": "name", "value": "Outreach Queue" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": { "status": "replied_stop_sequence" }
+        }
+      },
+      "id": "sheets-stop",
+      "name": "CRM: Mark Sequence Stopped",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1420, 180],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "PLACEHOLDER_CRED_ID", "name": "PLACEHOLDER Google Sheets account" }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $json.sender_email }}",
+        "toEmail": "={{ $json.lead_email }}",
+        "subject": "={{ $json.followup_subject }}",
+        "text": "={{ $json.followup_body }}",
+        "options": {}
+      },
+      "id": "send-followup",
+      "name": "Send: Follow-Up Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1420, 380],
+      "credentials": {
+        "smtp": { "id": "PLACEHOLDER_CRED_ID", "name": "PLACEHOLDER SMTP account" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": { "mode": "id", "value": "PLACEHOLDER_SHEET_ID" },
+        "sheetName": { "mode": "name", "value": "Outreach Queue" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "step_number": "={{ $json.step_number + 1 }}",
+            "next_send_due": "={{ $now.plus({ days: 3 }).toISO() }}"
+          }
+        }
+      },
+      "id": "sheets-advance",
+      "name": "CRM: Advance to Next Step",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1660, 380],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "PLACEHOLDER_CRED_ID", "name": "PLACEHOLDER Google Sheets account" }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule: Hourly Check": {
+      "main": [[{ "node": "Get: Leads Due for Next Step", "type": "main", "index": 0 }]]
+    },
+    "Get: Leads Due for Next Step": {
+      "main": [[{ "node": "IF: Step Is Due Now", "type": "main", "index": 0 }]]
+    },
+    "IF: Step Is Due Now": {
+      "main": [[{ "node": "HTTP: Check Thread for Reply", "type": "main", "index": 0 }]]
+    },
+    "HTTP: Check Thread for Reply": {
+      "main": [[{ "node": "IF: Already Replied", "type": "main", "index": 0 }]]
+    },
+    "IF: Already Replied": {
+      "main": [
+        [{ "node": "CRM: Mark Sequence Stopped", "type": "main", "index": 0 }],
+        [{ "node": "Send: Follow-Up Email", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send: Follow-Up Email": {
+      "main": [[{ "node": "CRM: Advance to Next Step", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
