@@ -1,0 +1,238 @@
+{
+  "name": "Lead Capture → AI Classify → Route",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-capture",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook-1",
+      "name": "Webhook: New Lead",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 320],
+      "webhookId": "PLACEHOLDER_WEBHOOK_ID"
+    },
+    {
+      "parameters": {
+        "content": "## Entry point\nFires on every form / chat-widget submission. Expected JSON body: { name, email, message, source }.\nNo auth here — the next step treats everything as untrusted input.",
+        "height": 180,
+        "width": 260
+      },
+      "id": "sticky-1",
+      "name": "Note: Entry",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [220, 140]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You classify inbound sales leads. Reply with ONLY one word: 'hot', 'warm', or 'spam'. 'hot' = clear buying intent and budget signal. 'warm' = genuine interest, no urgency/budget signal yet. 'spam' = irrelevant, templated, or bot-like."
+            },
+            {
+              "role": "user",
+              "content": "={{ $json.message }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0
+        }
+      },
+      "id": "ai-classify-1",
+      "name": "AI: Classify Lead",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [480, 320],
+      "credentials": {
+        "openAiApi": {
+          "id": "PLACEHOLDER_CRED_ID",
+          "name": "PLACEHOLDER OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Why classify before anything else\nRouting spam/low-intent leads into the CRM pollutes pipeline reports and wastes sales time.\nClassification happens once, immediately, so every downstream branch can trust the label instead of re-checking.",
+        "height": 180,
+        "width": 260
+      },
+      "id": "sticky-2",
+      "name": "Note: Why classify first",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [460, 140]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.choices[0].message.content.trim().toLowerCase() }}",
+                    "rightValue": "hot",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "hot"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.choices[0].message.content.trim().toLowerCase() }}",
+                    "rightValue": "warm",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "warm"
+            }
+          ]
+        },
+        "options": { "fallbackOutput": "extra" }
+      },
+      "id": "switch-1",
+      "name": "Switch: Route by Label",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [720, 320]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "mode": "id", "value": "PLACEHOLDER_SHEET_ID" },
+        "sheetName": { "mode": "name", "value": "Hot Leads" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "name": "={{ $('Webhook: New Lead').item.json.name }}",
+            "email": "={{ $('Webhook: New Lead').item.json.email }}",
+            "message": "={{ $('Webhook: New Lead').item.json.message }}",
+            "classified_at": "={{ $now.toISO() }}"
+          }
+        }
+      },
+      "id": "sheets-hot",
+      "name": "CRM: Append Hot Lead",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [980, 180],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "PLACEHOLDER_CRED_ID", "name": "PLACEHOLDER Google Sheets account" }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "#hot-leads",
+        "text": "=🔥 Hot lead: {{ $('Webhook: New Lead').item.json.name }} ({{ $('Webhook: New Lead').item.json.email }})\n\"{{ $('Webhook: New Lead').item.json.message }}\""
+      },
+      "id": "slack-alert",
+      "name": "Alert: Slack #hot-leads",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1220, 180],
+      "credentials": {
+        "slackApi": { "id": "PLACEHOLDER_CRED_ID", "name": "PLACEHOLDER Slack account" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "mode": "id", "value": "PLACEHOLDER_SHEET_ID" },
+        "sheetName": { "mode": "name", "value": "Warm Leads" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "name": "={{ $('Webhook: New Lead').item.json.name }}",
+            "email": "={{ $('Webhook: New Lead').item.json.email }}",
+            "classified_at": "={{ $now.toISO() }}"
+          }
+        }
+      },
+      "id": "sheets-warm",
+      "name": "CRM: Append Warm Lead",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [980, 340],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "PLACEHOLDER_CRED_ID", "name": "PLACEHOLDER Google Sheets account" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "mode": "id", "value": "PLACEHOLDER_SHEET_ID" },
+        "sheetName": { "mode": "name", "value": "Spam Log" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "email": "={{ $('Webhook: New Lead').item.json.email }}",
+            "message": "={{ $('Webhook: New Lead').item.json.message }}",
+            "logged_at": "={{ $now.toISO() }}"
+          }
+        }
+      },
+      "id": "sheets-spam",
+      "name": "Log: Spam (no alert)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [980, 500],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "PLACEHOLDER_CRED_ID", "name": "PLACEHOLDER Google Sheets account" }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Fallback branch\nAnything that isn't exactly 'hot' or 'warm' (including unexpected model output) falls through to the 'extra' output and gets logged as spam — fails safe, never silently drops a lead.",
+        "height": 160,
+        "width": 260
+      },
+      "id": "sticky-3",
+      "name": "Note: Fail-safe fallback",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [960, 620]
+    }
+  ],
+  "connections": {
+    "Webhook: New Lead": {
+      "main": [[{ "node": "AI: Classify Lead", "type": "main", "index": 0 }]]
+    },
+    "AI: Classify Lead": {
+      "main": [[{ "node": "Switch: Route by Label", "type": "main", "index": 0 }]]
+    },
+    "Switch: Route by Label": {
+      "main": [
+        [{ "node": "CRM: Append Hot Lead", "type": "main", "index": 0 }],
+        [{ "node": "CRM: Append Warm Lead", "type": "main", "index": 0 }],
+        [{ "node": "Log: Spam (no alert)", "type": "main", "index": 0 }]
+      ]
+    },
+    "CRM: Append Hot Lead": {
+      "main": [[{ "node": "Alert: Slack #hot-leads", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
